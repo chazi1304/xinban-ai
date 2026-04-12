@@ -1,6 +1,6 @@
 """
-心伴AI - 完整版（含安全检测 + 长期记忆 + 主动提醒）
-功能：情感纠偏、情绪仪表盘、主动关怀、用户拒绝反馈、极端危机安全协议、重要日期记忆与提醒（提前一天）
+心伴AI - 完整版（含安全检测 + 长期记忆 + 主动提醒 + 智能关怀）
+功能：情感纠偏、情绪仪表盘、主动关怀（仅早晨、每天一次）、用户拒绝反馈、极端危机安全协议、重要日期记忆与提醒
 """
 
 import streamlit as st
@@ -123,20 +123,19 @@ def update_memory_from_conversation(user_input, profile):
     return profile
 
 def check_upcoming_events(profile):
-    """检查是否有未来1天内的重要事件，返回提醒消息列表（只提前一天提醒）"""
+    """检查是否有未来1天内的重要事件，返回提醒消息列表"""
     today = datetime.now().date()
     reminders = []
     for event in profile["important_events"]:
         event_date = datetime.strptime(event["date"], "%Y-%m-%d").date()
         days_diff = (event_date - today).days
-        # 只提前一天提醒（days_diff == 1）
-        if days_diff == 1:
+        if 0 <= days_diff <= event.get("remind_days", 1):
             if event["type"] == "birthday":
                 reminders.append(f"🎂 明天（{event_date}）是你的生日！提前祝你生日快乐～")
             elif event["type"] == "exam":
-                reminders.append(f"📚 提醒：明天（{event_date}）有{event['name']}，记得提前准备哦！加油！")
+                reminders.append(f"📚 提醒：{event_date} 有{event['name']}，记得提前准备哦！加油！")
             else:
-                reminders.append(f"📅 提醒：明天（{event_date}）有{event['name']}，别忘了～")
+                reminders.append(f"📅 提醒：{event_date} 有{event['name']}，别忘了～")
     return reminders
 
 # ==================== 安全检测 ====================
@@ -191,59 +190,44 @@ def save_emotion_log(log):
         json.dump(log[-100:], f, ensure_ascii=False, indent=2)
 
 def detect_emotion(user_text, recent_emotions):
-    # 预处理：转为小写（可选）
     text = user_text.lower()
-    
-    # 消极关键词（独立词，不依赖积极词）
     negative_keywords = [
         '废物', '没用', '太差', '崩溃', '绝望', '焦虑', '烦死了', '好烦',
         '我太笨', '我真蠢', '失败', '糟糕', '头疼', '无语', '心累', '憋屈',
         '不爽', '火大', '压力大', '喘不过气', '扛不住', '好累', '失落',
         '沮丧', '郁闷', 'emo', '没劲', '我不行', '我好差', '真倒霉', '倒霉',
-        # 新增常见消极表达
         '难受', '伤心', '痛苦', '抑郁', '孤单', '孤独', '无助', '迷茫',
         '不开心', '不高兴', '不快乐', '不好', '不行', '不可以', '不要',
         '讨厌', '恶心', '烦人', '气死', '恨', '哭', '想哭'
     ]
-    
-    # 积极关键词（独立词）
     positive_keywords = [
         '开心', '高兴', '棒', '不错', '还不错', '喜欢', '感谢', '太好了',
         '幸福', '兴奋', '好棒', '厉害', '优秀', '还行', '挺好的', '蛮好',
         '可以', '舒服', '爽', '美滋滋', '棒棒哒', '给力', '赞', '佩服',
         '满足', '感恩', '幸运', '知足', '期待', '向往', '激动', '好想',
-        # 新增常见积极表达
         '快乐', '美好', '甜蜜', '温暖', '阳光', '灿烂', '微笑', '大笑',
         '哈哈', '嘿嘿', '耶', '哇', '好极了'
     ]
-    
-    # 否定词模式（用于反转积极词）
     negation_patterns = ['不', '没', '别', '不是', '没有']
     
-    # 先检查包含积极词但被否定修饰的情况
+    # 先处理被否定的积极词（转为消极）
     for kw in positive_keywords:
         if kw in text:
-            # 检查前面是否有否定词（简单实现：查找关键词前3个字符内）
             idx = text.find(kw)
             if idx > 0:
                 prev_chars = text[max(0, idx-3):idx]
                 if any(neg in prev_chars for neg in negation_patterns):
-                    # 被否定的积极词 → 消极情绪
                     need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1
                     return {'label': '消极', 'need_correction': need_correction}
-            # 未被否定，则返回积极
             return {'label': '积极', 'need_correction': False}
     
-    # 再检查消极关键词
     for kw in negative_keywords:
         if kw in text:
             need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1
-            # 自我贬低强制触发纠偏
             if any(x in text for x in ['笨', '没用', '废物', '不行', '不好']):
                 need_correction = True
             return {'label': '消极', 'need_correction': need_correction}
     
-    # 默认平静
     return {'label': '平静', 'need_correction': False}
 
 def check_rejection(user_text):
@@ -282,21 +266,47 @@ def get_ai_reply(user_input, history, need_correction, emotion_label, disable_co
         else:
             return "我能理解你的感受。不过，也许我们可以换个角度看看？你觉得呢？"
 
-def check_active_care():
+# ==================== 主动关怀（改进版） ====================
+def get_care_message():
+    """返回合适的关怀消息（仅在早晨、且昨晚有负面情绪时，每天一次）"""
+    if "last_care_date" not in st.session_state:
+        st.session_state.last_care_date = None
+    
+    today = datetime.now().date()
+    if st.session_state.last_care_date == today:
+        return None  # 今天已经推送过了
+    
+    # 只在早晨 6:00 - 11:00 之间推送
+    current_hour = datetime.now().hour
+    if not (6 <= current_hour <= 11):
+        return None
+    
+    # 检查昨晚 22:00 后是否有负面情绪
     logs = load_emotion_log()
     if len(logs) < 1:
         return None
+    
     now = datetime.now()
-    last_night = now.replace(hour=22, minute=0) - timedelta(days=1)
+    last_night = now.replace(hour=22, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    has_negative = False
     for log in logs[-10:]:
         log_time = datetime.fromisoformat(log['timestamp'])
         if log_time > last_night and log['emotion'] in ['消极', '焦虑']:
-            return "🌅 早安～昨晚你看起来有点难过，今天天气不错，希望你有好心情！"
-    return None
+            has_negative = True
+            break
+    
+    if not has_negative:
+        return None
+    
+    greeting = "早安"
+    message = f"{greeting}～昨晚你看起来有点难过，希望今天的心情能像阳光一样明媚 ☀️"
+    
+    st.session_state.last_care_date = today
+    return message
 
 # ==================== UI ====================
 st.title("❤️ 心伴AI")
-st.caption("会引导、会主动关心的AI情感陪伴系统 | 我能记住你的重要日子，提前一天提醒你")
+st.caption("会引导、会主动关心的AI情感陪伴系统 | 我能记住你的重要日子")
 
 with st.sidebar:
     st.header("📊 情绪仪表盘")
@@ -327,17 +337,21 @@ with st.sidebar:
         save_user_profile({"important_events": []})
         st.session_state.messages = []
         st.session_state.disable_correction_counter = 0
+        st.session_state.last_care_date = None
         st.rerun()
 
 # 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.disable_correction_counter = 0
+    st.session_state.last_care_date = None
     
-    care_msg = check_active_care()
+    # 主动关怀（改进版）
+    care_msg = get_care_message()
     if care_msg:
         st.session_state.messages.append({"role": "assistant", "content": f"🔔 {care_msg}"})
     
+    # 重要事件提醒
     profile = load_user_profile()
     reminders = check_upcoming_events(profile)
     for rem in reminders:
@@ -377,6 +391,7 @@ for msg in st.session_state.messages:
 # 输入框
 prompt = st.chat_input("说点什么...")
 if prompt:
+    # 安全检测（最高优先级）
     if check_crisis(prompt):
         log_safety_event(prompt, datetime.now().isoformat())
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -385,14 +400,17 @@ if prompt:
     
     st.session_state.messages.append({"role": "user", "content": prompt})
     
+    # 拒绝引导检测
     if check_rejection(prompt):
         st.session_state.disable_correction_counter = 3
         st.session_state.messages.append({"role": "assistant", "content": "好的，不强行引导了。我会安静陪着你，你想聊什么都可以。"})
         st.rerun()
     
+    # 更新长期记忆：提取重要日期
     profile = load_user_profile()
     profile = update_memory_from_conversation(prompt, profile)
     
+    # 情绪识别
     emotion_log = load_emotion_log()
     recent_emotions = [log['emotion'] for log in emotion_log[-5:]]
     emotion_result = detect_emotion(prompt, recent_emotions)
@@ -403,14 +421,16 @@ if prompt:
     })
     save_emotion_log(emotion_log)
     
+    # 判断是否禁用纠偏
     disable_corr = st.session_state.disable_correction_counter > 0
     if disable_corr:
         st.session_state.disable_correction_counter -= 1
     
+    # 获取 AI 回复
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
     reply = get_ai_reply(prompt, history, emotion_result['need_correction'], emotion_result['label'], disable_corr)
     st.session_state.messages.append({"role": "assistant", "content": reply})
     
     st.rerun()
 
-st.caption("💡 试试：「我考砸了，我太笨了」→ 系统会先共情再引导；「别说了」→ 停止纠偏；「我生日是5月20日」→ 我会记住并在前一天提醒")
+st.caption("💡 试试：「我考砸了，我太笨了」→ 系统会先共情再引导；「别说了」→ 停止纠偏；「我生日是5月20日」→ 我会记住并在当天提醒")

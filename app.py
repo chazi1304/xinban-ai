@@ -29,7 +29,7 @@ st.markdown("""
         max-width: 80%;
         text-align: left;
         display: flex;
-        flex-direction: row-reverse;  /* 头像在右，消息在左 */
+        flex-direction: row-reverse;
         gap: 8px;
     }
     
@@ -58,8 +58,6 @@ st.markdown("""
         flex-shrink: 0;
     }
     
-    /* 用户头像靠右，AI头像靠左 - 通过父容器的 flex-direction 已经处理 */
-    
     /* 消息文本区域 */
     [data-testid="stChatMessageContent"] {
         flex: 1;
@@ -75,7 +73,7 @@ st.markdown("""
         width: 280px;
     }
     
-    /* 主内容区域底部留空，避免被输入框遮挡 */
+    /* 主内容区域底部留空 */
     .main .block-container {
         padding-bottom: 80px;
     }
@@ -83,7 +81,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==================== 配置 ====================
-# 从 secrets 中安全读取 API 密钥
 try:
     DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 except:
@@ -92,12 +89,10 @@ except:
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
-# 数据存储目录
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 EMOTION_LOG_PATH = os.path.join(DATA_DIR, "emotion_log.json")
 
-# 系统提示词
 SYSTEM_PROMPT = """你是"心伴AI"，一个温暖的情感陪伴助手。
 
 【重要】你的回复中不要输出任何内部判断、情绪检测结果、模式标识。直接输出自然、温暖的对话内容即可。
@@ -169,17 +164,18 @@ def check_active_care():
 st.title("❤️ 心伴AI")
 st.caption("会引导、会主动关心的AI情感陪伴系统")
 
-# 侧边栏仪表盘
 with st.sidebar:
     st.header("📊 情绪仪表盘")
     emotion_log = load_emotion_log()
     if emotion_log:
         df = pd.DataFrame(emotion_log)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
+        # 关键修复：添加日期列
+        df['date'] = df['timestamp'].dt.date
+        
         fig1 = px.pie(df, names='emotion', title="情绪分布")
         st.plotly_chart(fig1, use_container_width=True)
         
-        # 最近7天趋势
         last7 = df[df['timestamp'] > datetime.now() - timedelta(days=7)]
         if not last7.empty:
             trend = last7.groupby(['date', 'emotion']).size().unstack().fillna(0)
@@ -192,31 +188,25 @@ with st.sidebar:
         save_emotion_log([])
         st.rerun()
 
-# 初始化消息历史
 if "messages" not in st.session_state:
     st.session_state.messages = []
     care_msg = check_active_care()
     if care_msg:
         st.session_state.messages.append({"role": "assistant", "content": f"🔔 {care_msg}"})
 
-# 显示历史消息
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 输入框
 if prompt := st.chat_input("说点什么..."):
-    # 显示用户消息
     with st.chat_message("user"):
         st.markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # 情绪识别
     emotion_log = load_emotion_log()
     recent_emotions = [log['emotion'] for log in emotion_log[-5:]]
     emotion_result = detect_emotion(prompt, recent_emotions)
     
-    # 记录情绪
     emotion_log.append({
         "timestamp": datetime.now().isoformat(),
         "emotion": emotion_result['label'],
@@ -224,11 +214,9 @@ if prompt := st.chat_input("说点什么..."):
     })
     save_emotion_log(emotion_log)
     
-    # 获取AI回复
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
     reply = get_ai_reply(prompt, history, emotion_result['need_correction'])
     
-    # 显示AI回复
     with st.chat_message("assistant"):
         st.markdown(reply)
     st.session_state.messages.append({"role": "assistant", "content": reply})

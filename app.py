@@ -191,27 +191,59 @@ def save_emotion_log(log):
         json.dump(log[-100:], f, ensure_ascii=False, indent=2)
 
 def detect_emotion(user_text, recent_emotions):
+    # 预处理：转为小写（可选）
+    text = user_text.lower()
+    
+    # 消极关键词（独立词，不依赖积极词）
     negative_keywords = [
         '废物', '没用', '太差', '崩溃', '绝望', '焦虑', '烦死了', '好烦',
         '我太笨', '我真蠢', '失败', '糟糕', '头疼', '无语', '心累', '憋屈',
         '不爽', '火大', '压力大', '喘不过气', '扛不住', '好累', '失落',
-        '沮丧', '郁闷', 'emo', '没劲', '我不行', '我好差', '真倒霉', '倒霉'
+        '沮丧', '郁闷', 'emo', '没劲', '我不行', '我好差', '真倒霉', '倒霉',
+        # 新增常见消极表达
+        '难受', '伤心', '痛苦', '抑郁', '孤单', '孤独', '无助', '迷茫',
+        '不开心', '不高兴', '不快乐', '不好', '不行', '不可以', '不要',
+        '讨厌', '恶心', '烦人', '气死', '恨', '哭', '想哭'
     ]
+    
+    # 积极关键词（独立词）
     positive_keywords = [
         '开心', '高兴', '棒', '不错', '还不错', '喜欢', '感谢', '太好了',
         '幸福', '兴奋', '好棒', '厉害', '优秀', '还行', '挺好的', '蛮好',
         '可以', '舒服', '爽', '美滋滋', '棒棒哒', '给力', '赞', '佩服',
-        '满足', '感恩', '幸运', '知足', '期待', '向往', '激动', '好想'
+        '满足', '感恩', '幸运', '知足', '期待', '向往', '激动', '好想',
+        # 新增常见积极表达
+        '快乐', '美好', '甜蜜', '温暖', '阳光', '灿烂', '微笑', '大笑',
+        '哈哈', '嘿嘿', '耶', '哇', '好极了'
     ]
+    
+    # 否定词模式（用于反转积极词）
+    negation_patterns = ['不', '没', '别', '不是', '没有']
+    
+    # 先检查包含积极词但被否定修饰的情况
+    for kw in positive_keywords:
+        if kw in text:
+            # 检查前面是否有否定词（简单实现：查找关键词前3个字符内）
+            idx = text.find(kw)
+            if idx > 0:
+                prev_chars = text[max(0, idx-3):idx]
+                if any(neg in prev_chars for neg in negation_patterns):
+                    # 被否定的积极词 → 消极情绪
+                    need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1
+                    return {'label': '消极', 'need_correction': need_correction}
+            # 未被否定，则返回积极
+            return {'label': '积极', 'need_correction': False}
+    
+    # 再检查消极关键词
     for kw in negative_keywords:
-        if kw in user_text:
+        if kw in text:
             need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1
-            if any(x in user_text for x in ['笨', '没用', '废物']):
+            # 自我贬低强制触发纠偏
+            if any(x in text for x in ['笨', '没用', '废物', '不行', '不好']):
                 need_correction = True
             return {'label': '消极', 'need_correction': need_correction}
-    for kw in positive_keywords:
-        if kw in user_text:
-            return {'label': '积极', 'need_correction': False}
+    
+    # 默认平静
     return {'label': '平静', 'need_correction': False}
 
 def check_rejection(user_text):

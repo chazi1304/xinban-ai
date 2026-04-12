@@ -1,7 +1,7 @@
 """
 心伴AI - 完整版（适配 Streamlit Cloud 部署）
 功能：情感纠偏 + 情绪仪表盘 + 主动关怀模拟
-布局：用户消息在右，AI回复在左，带头像
+布局：用户消息在右（带头像），AI回复在左（带心形图标）
 """
 
 import streamlit as st
@@ -14,79 +14,6 @@ from openai import OpenAI
 
 # ==================== 页面配置 ====================
 st.set_page_config(page_title="心伴AI", page_icon="❤️", layout="wide")
-
-# ==================== 自定义CSS（左右对话布局，显示头像） ====================
-st.markdown("""
-<style>
-/* 整个消息行容器 */
-.stChatMessage {
-    display: flex !important;
-    margin-bottom: 16px !important;
-    width: 100% !important;
-    align-items: flex-start !important;
-}
-
-/* 用户消息：整体靠右，头像在右，消息在左 */
-.stChatMessage[data-role="user"] {
-    justify-content: flex-end !important;
-    flex-direction: row-reverse !important;
-}
-
-/* AI 消息：整体靠左，头像在左，消息在右 */
-.stChatMessage[data-role="assistant"] {
-    justify-content: flex-start !important;
-    flex-direction: row !important;
-}
-
-/* 头像容器 */
-.stChatMessageAvatar {
-    width: 36px !important;
-    height: 36px !important;
-    border-radius: 50% !important;
-    margin: 0 8px !important;
-    flex-shrink: 0 !important;
-}
-
-/* 消息气泡内容区 */
-.stChatMessageContent {
-    max-width: 70% !important;
-    padding: 8px 14px !important;
-    border-radius: 18px !important;
-    font-size: 14px !important;
-    line-height: 1.4 !important;
-}
-
-/* 用户气泡（绿色） */
-.stChatMessage[data-role="user"] .stChatMessageContent {
-    background-color: #dcf8c5 !important;
-    border-top-right-radius: 4px !important;
-    border-bottom-right-radius: 18px !important;
-    border-top-left-radius: 18px !important;
-    border-bottom-left-radius: 18px !important;
-}
-
-/* AI 气泡（白色带阴影） */
-.stChatMessage[data-role="assistant"] .stChatMessageContent {
-    background-color: #ffffff !important;
-    border: 1px solid #e0e0e0 !important;
-    border-top-left-radius: 4px !important;
-    border-bottom-left-radius: 18px !important;
-    border-top-right-radius: 18px !important;
-    border-bottom-right-radius: 18px !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-}
-
-/* 调整侧边栏宽度 */
-[data-testid="stSidebar"] {
-    width: 280px;
-}
-
-/* 主区域底部留空，避免输入框遮挡 */
-.main .block-container {
-    padding-bottom: 100px;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ==================== 配置 ====================
 try:
@@ -178,12 +105,9 @@ with st.sidebar:
     if emotion_log:
         df = pd.DataFrame(emotion_log)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        # 关键修复：添加日期列
         df['date'] = df['timestamp'].dt.date
-        
         fig1 = px.pie(df, names='emotion', title="情绪分布")
         st.plotly_chart(fig1, use_container_width=True)
-        
         last7 = df[df['timestamp'] > datetime.now() - timedelta(days=7)]
         if not last7.empty:
             trend = last7.groupby(['date', 'emotion']).size().unstack().fillna(0)
@@ -191,30 +115,60 @@ with st.sidebar:
             st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("暂无数据，开始对话后会自动记录")
-    
     if st.button("🗑️ 清除所有记忆", use_container_width=True):
         save_emotion_log([])
         st.rerun()
 
+# 初始化消息历史
 if "messages" not in st.session_state:
     st.session_state.messages = []
     care_msg = check_active_care()
     if care_msg:
         st.session_state.messages.append({"role": "assistant", "content": f"🔔 {care_msg}"})
 
+# 显示历史消息 - 自定义布局（带头像）
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    if msg["role"] == "user":
+        # 用户消息：靠右，绿色气泡，右侧显示默认头像（👤）
+        st.markdown(
+            f"""
+            <div style="display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 12px;">
+                <div style="background-color: #dcf8c5; border-radius: 18px; padding: 8px 14px; max-width: 70%; word-wrap: break-word;">
+                    {msg["content"]}
+                </div>
+                <div style="margin-left: 8px; width: 36px; height: 36px; border-radius: 50%; background-color: #ccc; display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                    👤
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        # AI 消息：靠左，白色气泡，左侧显示心形图标
+        st.markdown(
+            f"""
+            <div style="display: flex; justify-content: flex-start; align-items: flex-start; margin-bottom: 12px;">
+                <div style="margin-right: 8px; width: 36px; height: 36px; border-radius: 50%; background-color: #ff6b6b; display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                    ❤️
+                </div>
+                <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 18px; padding: 8px 14px; max-width: 70%; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                    {msg["content"]}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-if prompt := st.chat_input("说点什么..."):
-    with st.chat_message("user"):
-        st.markdown(prompt)
+# 输入框
+prompt = st.chat_input("说点什么...")
+if prompt:
+    # 添加用户消息到历史
     st.session_state.messages.append({"role": "user", "content": prompt})
     
+    # 情绪识别
     emotion_log = load_emotion_log()
     recent_emotions = [log['emotion'] for log in emotion_log[-5:]]
     emotion_result = detect_emotion(prompt, recent_emotions)
-    
     emotion_log.append({
         "timestamp": datetime.now().isoformat(),
         "emotion": emotion_result['label'],
@@ -222,11 +176,12 @@ if prompt := st.chat_input("说点什么..."):
     })
     save_emotion_log(emotion_log)
     
+    # 获取 AI 回复
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
     reply = get_ai_reply(prompt, history, emotion_result['need_correction'])
-    
-    with st.chat_message("assistant"):
-        st.markdown(reply)
     st.session_state.messages.append({"role": "assistant", "content": reply})
+    
+    # 重新运行以刷新界面
+    st.rerun()
 
 st.caption("💡 试试输入：「我考砸了，我太笨了」或「我好焦虑」→ 系统会先共情再引导")

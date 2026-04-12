@@ -15,7 +15,14 @@ from openai import OpenAI
 st.set_page_config(page_title="心伴AI", page_icon="❤️", layout="wide")
 
 # 🔧 请将下面的 "你的API密钥" 替换成你在 DeepSeek 平台获得的真实密钥
-DEEPSEEK_API_KEY = "sk-52ef6dfd61034eb1b6739dde1c3a6373"
+import streamlit as st
+
+# 从 secrets 中安全读取 API 密钥
+try:
+    DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
+except:
+    st.error("❌ 未找到 API 密钥，请在 .streamlit/secrets.toml 中配置 DEEPSEEK_API_KEY")
+    st.stop()
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 # 数据存储目录

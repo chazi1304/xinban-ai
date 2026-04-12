@@ -18,65 +18,73 @@ st.set_page_config(page_title="心伴AI", page_icon="❤️", layout="wide")
 # ==================== 自定义CSS（左右对话布局，显示头像） ====================
 st.markdown("""
 <style>
-    /* 用户消息容器 - 右对齐 */
-    [data-testid="stChatMessage"][aria-label="user"] {
-        background-color: #dcf8c5;
-        border-radius: 18px;
-        padding: 10px 16px;
-        margin-left: auto;
-        margin-right: 0;
-        width: fit-content;
-        max-width: 80%;
-        text-align: left;
-        display: flex;
-        flex-direction: row-reverse;
-        gap: 8px;
-    }
-    
-    /* AI消息容器 - 左对齐 */
-    [data-testid="stChatMessage"][aria-label="assistant"] {
-        background-color: #ffffff;
-        border-radius: 18px;
-        padding: 10px 16px;
-        margin-left: 0;
-        margin-right: auto;
-        width: fit-content;
-        max-width: 80%;
-        text-align: left;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        display: flex;
-        flex-direction: row;
-        gap: 8px;
-    }
-    
-    /* 头像样式 */
-    [data-testid="stChatMessageAvatar"] {
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        object-fit: cover;
-        flex-shrink: 0;
-    }
-    
-    /* 消息文本区域 */
-    [data-testid="stChatMessageContent"] {
-        flex: 1;
-    }
-    
-    /* 调整消息之间的间距 */
-    .stChatMessage {
-        margin-bottom: 12px;
-    }
-    
-    /* 侧边栏宽度调整 */
-    [data-testid="stSidebar"] {
-        width: 280px;
-    }
-    
-    /* 主内容区域底部留空 */
-    .main .block-container {
-        padding-bottom: 80px;
-    }
+/* 整个消息行容器 */
+.stChatMessage {
+    display: flex !important;
+    margin-bottom: 16px !important;
+    width: 100% !important;
+    align-items: flex-start !important;
+}
+
+/* 用户消息：整体靠右，头像在右，消息在左 */
+.stChatMessage[data-role="user"] {
+    justify-content: flex-end !important;
+    flex-direction: row-reverse !important;
+}
+
+/* AI 消息：整体靠左，头像在左，消息在右 */
+.stChatMessage[data-role="assistant"] {
+    justify-content: flex-start !important;
+    flex-direction: row !important;
+}
+
+/* 头像容器 */
+.stChatMessageAvatar {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    margin: 0 8px !important;
+    flex-shrink: 0 !important;
+}
+
+/* 消息气泡内容区 */
+.stChatMessageContent {
+    max-width: 70% !important;
+    padding: 8px 14px !important;
+    border-radius: 18px !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+}
+
+/* 用户气泡（绿色） */
+.stChatMessage[data-role="user"] .stChatMessageContent {
+    background-color: #dcf8c5 !important;
+    border-top-right-radius: 4px !important;
+    border-bottom-right-radius: 18px !important;
+    border-top-left-radius: 18px !important;
+    border-bottom-left-radius: 18px !important;
+}
+
+/* AI 气泡（白色带阴影） */
+.stChatMessage[data-role="assistant"] .stChatMessageContent {
+    background-color: #ffffff !important;
+    border: 1px solid #e0e0e0 !important;
+    border-top-left-radius: 4px !important;
+    border-bottom-left-radius: 18px !important;
+    border-top-right-radius: 18px !important;
+    border-bottom-right-radius: 18px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+}
+
+/* 调整侧边栏宽度 */
+[data-testid="stSidebar"] {
+    width: 280px;
+}
+
+/* 主区域底部留空，避免输入框遮挡 */
+.main .block-container {
+    padding-bottom: 100px;
+}
 </style>
 """, unsafe_allow_html=True)
 

@@ -1,12 +1,12 @@
 """
-心伴AI - 完整版（适配 Streamlit Cloud 部署）
-功能：情感纠偏 + 情绪仪表盘 + 主动关怀模拟
-布局：用户消息在右（带头像），AI回复在左（带心形图标）
+心伴AI - 完整版（含安全检测 + 长期记忆 + 主动提醒）
+功能：情感纠偏、情绪仪表盘、主动关怀、用户拒绝反馈、极端危机安全协议、重要日期记忆与提醒（提前一天）
 """
 
 import streamlit as st
 import json
 import os
+import re
 from datetime import datetime, timedelta
 import plotly.express as px
 import pandas as pd
@@ -27,28 +27,159 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 EMOTION_LOG_PATH = os.path.join(DATA_DIR, "emotion_log.json")
+USER_PROFILE_PATH = os.path.join(DATA_DIR, "user_profile.json")
+SAFETY_LOG_PATH = os.path.join(DATA_DIR, "safety_log.json")
 
+# ==================== 系统提示词 ====================
 SYSTEM_PROMPT = """你是"心伴AI"，一个温暖的情感陪伴助手。
 
-【重要】你的回复中不要输出任何内部判断、情绪检测结果、模式标识。直接输出自然、温暖的对话内容即可。
+【重要规则】
+- 当用户表达积极、开心的情绪时，你只需正常祝贺、分享快乐，绝对不要进行任何认知引导或纠偏。
+- 当用户明确表示不想被引导（如说“别说了”、“我不想听”、“别管我”等），请立即停止任何纠偏尝试，转为普通共情模式，并尊重用户的意愿。
+- 只有当用户连续表现出消极、焦虑、自我贬低，且没有拒绝引导时，才使用纠偏模式（先共情，再引导换角度思考）。
 
-【纠偏模式触发条件】
+【纠偏模式触发条件（仅限负面且用户未拒绝）】
 - 用户连续2轮表现出消极/焦虑情绪
 - 用户出现自我贬低表述（如"我真没用""我太笨了"）
 
-【纠偏模式回复格式（必须遵守）】
+【纠偏模式回复格式（仅在触发时使用）】
 第一步：共情句（承认用户感受）
 第二步：引导句（用问句挑战负面认知）
 
-【正确示例】
+【正确示例（负面情绪且未拒绝）】
 用户："我考砸了，我太笨了"
 回复："我能理解你现在的失落。但一次考试真的能定义你笨不笨吗？有没有可能是复习方法的问题？"
 
-【禁止使用的回复】
-- "别难过了"
-- "加油你会更好的"
+【正确示例（用户拒绝引导后）】
+用户："别说了，我不想听"
+回复："好的，不说了。我就在这里陪着你，你想聊什么都可以。"
+
+【禁止行为】
+- 对积极情绪进行纠偏或说教
+- 用户拒绝后继续强行引导
 """
 
+# ==================== 长期记忆功能 ====================
+def load_user_profile():
+    if os.path.exists(USER_PROFILE_PATH):
+        with open(USER_PROFILE_PATH, "r") as f:
+            return json.load(f)
+    return {"important_events": []}  # 每个事件：{"name": "生日", "date": "2025-05-20", "type": "birthday", "remind_days": 1}
+
+def save_user_profile(profile):
+    with open(USER_PROFILE_PATH, "w") as f:
+        json.dump(profile, f, ensure_ascii=False, indent=2)
+
+def extract_important_dates(user_input):
+    """从用户输入中提取重要日期（生日、考试等）"""
+    events = []
+    date_patterns = [
+        (r'(生日|生辰).*?(\d{1,2})月(\d{1,2})日', 'birthday'),
+        (r'(\d{1,2})月(\d{1,2})日.*?(生日|生辰)', 'birthday'),
+        (r'(考试|面试|答辩).*?(\d{1,2})月(\d{1,2})日', 'exam'),
+        (r'(\d{1,2})月(\d{1,2})日.*?(考试|面试|答辩)', 'exam'),
+    ]
+    current_year = datetime.now().year
+    for pattern, event_type in date_patterns:
+        match = re.search(pattern, user_input)
+        if match:
+            if event_type == 'birthday':
+                month, day = int(match.group(2)), int(match.group(3))
+                date_obj = datetime(current_year, month, day)
+                if date_obj < datetime.now():
+                    date_obj = datetime(current_year + 1, month, day)
+                events.append({
+                    "name": "生日",
+                    "date": date_obj.strftime("%Y-%m-%d"),
+                    "type": "birthday",
+                    "remind_days": 1
+                })
+            elif event_type == 'exam':
+                month, day = int(match.group(2)), int(match.group(3))
+                date_obj = datetime(current_year, month, day)
+                if date_obj < datetime.now():
+                    date_obj = datetime(current_year + 1, month, day)
+                events.append({
+                    "name": "考试",
+                    "date": date_obj.strftime("%Y-%m-%d"),
+                    "type": "exam",
+                    "remind_days": 1
+                })
+    return events
+
+def update_memory_from_conversation(user_input, profile):
+    new_events = extract_important_dates(user_input)
+    for ev in new_events:
+        exists = False
+        for existing in profile["important_events"]:
+            if existing["type"] == ev["type"] and existing["date"] == ev["date"]:
+                exists = True
+                break
+        if not exists:
+            profile["important_events"].append(ev)
+    profile["important_events"].sort(key=lambda x: x["date"])
+    profile["important_events"] = profile["important_events"][-10:]
+    save_user_profile(profile)
+    return profile
+
+def check_upcoming_events(profile):
+    """检查是否有未来1天内的重要事件，返回提醒消息列表（只提前一天提醒）"""
+    today = datetime.now().date()
+    reminders = []
+    for event in profile["important_events"]:
+        event_date = datetime.strptime(event["date"], "%Y-%m-%d").date()
+        days_diff = (event_date - today).days
+        # 只提前一天提醒（days_diff == 1）
+        if days_diff == 1:
+            if event["type"] == "birthday":
+                reminders.append(f"🎂 明天（{event_date}）是你的生日！提前祝你生日快乐～")
+            elif event["type"] == "exam":
+                reminders.append(f"📚 提醒：明天（{event_date}）有{event['name']}，记得提前准备哦！加油！")
+            else:
+                reminders.append(f"📅 提醒：明天（{event_date}）有{event['name']}，别忘了～")
+    return reminders
+
+# ==================== 安全检测 ====================
+CRISIS_KEYWORDS = [
+    '想死', '不想活了', '活不下去', '自杀', '死了算了',
+    '活着没意思', '我死了', '结束生命', '不想活', '死了好'
+]
+SAFETY_REPLY = """
+> ⚠️ **心伴AI温馨提示**
+
+我听到你现在的情绪非常痛苦。请记住，你并不孤单，有人愿意倾听和帮助你。
+
+**请立即联系专业心理援助热线：**
+- 📞 **全国统一心理援助热线：12356**（24小时）
+- 📞 **希望24热线：400-161-9995**（24小时）
+
+如果你不方便打电话，也可以告诉身边信任的人，或者直接前往最近的医院心理科。
+
+**你的生命和健康是第一位的。** 我无法替代专业医生，但我会一直在这里陪着你。请务必寻求帮助。
+"""
+
+def check_crisis(user_text):
+    for kw in CRISIS_KEYWORDS:
+        if kw in user_text:
+            return True
+    return False
+
+def log_safety_event(user_input, timestamp):
+    log_entry = {"timestamp": timestamp, "message": user_input[:100]}
+    try:
+        if os.path.exists(SAFETY_LOG_PATH):
+            with open(SAFETY_LOG_PATH, "r") as f:
+                logs = json.load(f)
+        else:
+            logs = []
+        logs.append(log_entry)
+        logs = logs[-50:]
+        with open(SAFETY_LOG_PATH, "w") as f:
+            json.dump(logs, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+# ==================== 情绪识别 ====================
 def load_emotion_log():
     if os.path.exists(EMOTION_LOG_PATH):
         with open(EMOTION_LOG_PATH, "r") as f:
@@ -60,17 +191,50 @@ def save_emotion_log(log):
         json.dump(log[-100:], f, ensure_ascii=False, indent=2)
 
 def detect_emotion(user_text, recent_emotions):
-    negative_keywords = ['废物', '没用', '太差', '崩溃', '绝望', '焦虑', '烦死了', '好烦', '我太笨', '我真蠢']
+    negative_keywords = [
+        '废物', '没用', '太差', '崩溃', '绝望', '焦虑', '烦死了', '好烦',
+        '我太笨', '我真蠢', '失败', '糟糕', '头疼', '无语', '心累', '憋屈',
+        '不爽', '火大', '压力大', '喘不过气', '扛不住', '好累', '失落',
+        '沮丧', '郁闷', 'emo', '没劲', '我不行', '我好差', '真倒霉', '倒霉'
+    ]
+    positive_keywords = [
+        '开心', '高兴', '棒', '不错', '还不错', '喜欢', '感谢', '太好了',
+        '幸福', '兴奋', '好棒', '厉害', '优秀', '还行', '挺好的', '蛮好',
+        '可以', '舒服', '爽', '美滋滋', '棒棒哒', '给力', '赞', '佩服',
+        '满足', '感恩', '幸运', '知足', '期待', '向往', '激动', '好想'
+    ]
     for kw in negative_keywords:
         if kw in user_text:
             need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1
-            if '笨' in user_text or '没用' in user_text:
+            if any(x in user_text for x in ['笨', '没用', '废物']):
                 need_correction = True
             return {'label': '消极', 'need_correction': need_correction}
+    for kw in positive_keywords:
+        if kw in user_text:
+            return {'label': '积极', 'need_correction': False}
     return {'label': '平静', 'need_correction': False}
 
-def get_ai_reply(user_input, history, need_correction):
-    mode_instruction = "【当前模式：纠偏模式】先共情，再用问句引导换角度思考。" if need_correction else "【当前模式：普通模式】正常共情回应。"
+def check_rejection(user_text):
+    reject_keywords = [
+        '别说了', '不想听', '别管我', '不要你管', '闭嘴', '烦不烦',
+        '别说教', '不要引导', '我自己知道', '别烦我', '够了', '停止'
+    ]
+    for kw in reject_keywords:
+        if kw in user_text:
+            return True
+    return False
+
+def get_ai_reply(user_input, history, need_correction, emotion_label, disable_correction):
+    if emotion_label == '积极':
+        return "😊 太好啦！为你感到高兴～能和我分享一下是什么好事吗？"
+    if disable_correction:
+        mode_instruction = "【当前模式：用户拒绝引导模式】用户不希望被纠偏，请只做普通共情，不要进行任何认知引导。"
+        need_correction = False
+    elif need_correction:
+        mode_instruction = "【当前模式：纠偏模式】用户表现出负面情绪，请先共情，再用问句引导换角度思考。"
+    else:
+        mode_instruction = "【当前模式：普通模式】正常共情回应即可，不要进行认知引导。"
+    
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT + mode_instruction},
         *history[-6:],
@@ -81,7 +245,10 @@ def get_ai_reply(user_input, history, need_correction):
         response = client.chat.completions.create(model="deepseek-chat", messages=messages, temperature=0.8)
         return response.choices[0].message.content
     except Exception as e:
-        return "我能理解你的感受。不过，也许我们可以换个角度看看？你觉得呢？" if need_correction else "我在这里陪着你。"
+        if disable_correction or not need_correction:
+            return "我在这里陪着你。"
+        else:
+            return "我能理解你的感受。不过，也许我们可以换个角度看看？你觉得呢？"
 
 def check_active_care():
     logs = load_emotion_log()
@@ -97,7 +264,7 @@ def check_active_care():
 
 # ==================== UI ====================
 st.title("❤️ 心伴AI")
-st.caption("会引导、会主动关心的AI情感陪伴系统")
+st.caption("会引导、会主动关心的AI情感陪伴系统 | 我能记住你的重要日子，提前一天提醒你")
 
 with st.sidebar:
     st.header("📊 情绪仪表盘")
@@ -106,7 +273,9 @@ with st.sidebar:
         df = pd.DataFrame(emotion_log)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['date'] = df['timestamp'].dt.date
-        fig1 = px.pie(df, names='emotion', title="情绪分布")
+        fig1 = px.pie(df, names='emotion', title="情绪分布", color_discrete_map={
+            '积极': '#4CAF50', '平静': '#2196F3', '消极': '#F44336'
+        })
         st.plotly_chart(fig1, use_container_width=True)
         last7 = df[df['timestamp'] > datetime.now() - timedelta(days=7)]
         if not last7.empty:
@@ -115,21 +284,36 @@ with st.sidebar:
             st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("暂无数据，开始对话后会自动记录")
+    
+    profile = load_user_profile()
+    if profile["important_events"]:
+        st.subheader("📅 我记住的重要日子")
+        for ev in profile["important_events"]:
+            st.write(f"- {ev['name']}: {ev['date']}")
     if st.button("🗑️ 清除所有记忆", use_container_width=True):
         save_emotion_log([])
+        save_user_profile({"important_events": []})
+        st.session_state.messages = []
+        st.session_state.disable_correction_counter = 0
         st.rerun()
 
-# 初始化消息历史
+# 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
+    st.session_state.disable_correction_counter = 0
+    
     care_msg = check_active_care()
     if care_msg:
         st.session_state.messages.append({"role": "assistant", "content": f"🔔 {care_msg}"})
+    
+    profile = load_user_profile()
+    reminders = check_upcoming_events(profile)
+    for rem in reminders:
+        st.session_state.messages.append({"role": "assistant", "content": f"🔔 {rem}"})
 
-# 显示历史消息 - 自定义布局（带头像）
+# 显示历史消息
 for msg in st.session_state.messages:
     if msg["role"] == "user":
-        # 用户消息：靠右，绿色气泡，右侧显示默认头像（👤）
         st.markdown(
             f"""
             <div style="display: flex; justify-content: flex-end; align-items: flex-start; margin-bottom: 12px;">
@@ -144,7 +328,6 @@ for msg in st.session_state.messages:
             unsafe_allow_html=True
         )
     else:
-        # AI 消息：靠左，白色气泡，左侧显示心形图标
         st.markdown(
             f"""
             <div style="display: flex; justify-content: flex-start; align-items: flex-start; margin-bottom: 12px;">
@@ -162,10 +345,22 @@ for msg in st.session_state.messages:
 # 输入框
 prompt = st.chat_input("说点什么...")
 if prompt:
-    # 添加用户消息到历史
+    if check_crisis(prompt):
+        log_safety_event(prompt, datetime.now().isoformat())
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "assistant", "content": SAFETY_REPLY})
+        st.rerun()
+    
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # 情绪识别
+    if check_rejection(prompt):
+        st.session_state.disable_correction_counter = 3
+        st.session_state.messages.append({"role": "assistant", "content": "好的，不强行引导了。我会安静陪着你，你想聊什么都可以。"})
+        st.rerun()
+    
+    profile = load_user_profile()
+    profile = update_memory_from_conversation(prompt, profile)
+    
     emotion_log = load_emotion_log()
     recent_emotions = [log['emotion'] for log in emotion_log[-5:]]
     emotion_result = detect_emotion(prompt, recent_emotions)
@@ -176,12 +371,14 @@ if prompt:
     })
     save_emotion_log(emotion_log)
     
-    # 获取 AI 回复
+    disable_corr = st.session_state.disable_correction_counter > 0
+    if disable_corr:
+        st.session_state.disable_correction_counter -= 1
+    
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
-    reply = get_ai_reply(prompt, history, emotion_result['need_correction'])
+    reply = get_ai_reply(prompt, history, emotion_result['need_correction'], emotion_result['label'], disable_corr)
     st.session_state.messages.append({"role": "assistant", "content": reply})
     
-    # 重新运行以刷新界面
     st.rerun()
 
-st.caption("💡 试试输入：「我考砸了，我太笨了」或「我好焦虑」→ 系统会先共情再引导")
+st.caption("💡 试试：「我考砸了，我太笨了」→ 系统会先共情再引导；「别说了」→ 停止纠偏；「我生日是5月20日」→ 我会记住并在前一天提醒")

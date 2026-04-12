@@ -1,6 +1,7 @@
 """
 心伴AI - 完整版（适配 Streamlit Cloud 部署）
 功能：情感纠偏 + 情绪仪表盘 + 主动关怀模拟
+布局：用户消息在右，AI回复在左，带头像
 """
 
 import streamlit as st
@@ -11,18 +12,84 @@ import plotly.express as px
 import pandas as pd
 from openai import OpenAI
 
-# ==================== 配置 ====================
+# ==================== 页面配置 ====================
 st.set_page_config(page_title="心伴AI", page_icon="❤️", layout="wide")
 
-# 🔧 请将下面的 "你的API密钥" 替换成你在 DeepSeek 平台获得的真实密钥
-import streamlit as st
+# ==================== 自定义CSS（左右对话布局，显示头像） ====================
+st.markdown("""
+<style>
+    /* 用户消息容器 - 右对齐 */
+    [data-testid="stChatMessage"][aria-label="user"] {
+        background-color: #dcf8c5;
+        border-radius: 18px;
+        padding: 10px 16px;
+        margin-left: auto;
+        margin-right: 0;
+        width: fit-content;
+        max-width: 80%;
+        text-align: left;
+        display: flex;
+        flex-direction: row-reverse;  /* 头像在右，消息在左 */
+        gap: 8px;
+    }
+    
+    /* AI消息容器 - 左对齐 */
+    [data-testid="stChatMessage"][aria-label="assistant"] {
+        background-color: #ffffff;
+        border-radius: 18px;
+        padding: 10px 16px;
+        margin-left: 0;
+        margin-right: auto;
+        width: fit-content;
+        max-width: 80%;
+        text-align: left;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+    }
+    
+    /* 头像样式 */
+    [data-testid="stChatMessageAvatar"] {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+    }
+    
+    /* 用户头像靠右，AI头像靠左 - 通过父容器的 flex-direction 已经处理 */
+    
+    /* 消息文本区域 */
+    [data-testid="stChatMessageContent"] {
+        flex: 1;
+    }
+    
+    /* 调整消息之间的间距 */
+    .stChatMessage {
+        margin-bottom: 12px;
+    }
+    
+    /* 侧边栏宽度调整 */
+    [data-testid="stSidebar"] {
+        width: 280px;
+    }
+    
+    /* 主内容区域底部留空，避免被输入框遮挡 */
+    .main .block-container {
+        padding-bottom: 80px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
+# ==================== 配置 ====================
 # 从 secrets 中安全读取 API 密钥
 try:
     DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 except:
     st.error("❌ 未找到 API 密钥，请在 .streamlit/secrets.toml 中配置 DEEPSEEK_API_KEY")
     st.stop()
+
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 # 数据存储目录
@@ -32,6 +99,8 @@ EMOTION_LOG_PATH = os.path.join(DATA_DIR, "emotion_log.json")
 
 # 系统提示词
 SYSTEM_PROMPT = """你是"心伴AI"，一个温暖的情感陪伴助手。
+
+【重要】你的回复中不要输出任何内部判断、情绪检测结果、模式标识。直接输出自然、温暖的对话内容即可。
 
 【纠偏模式触发条件】
 - 用户连续2轮表现出消极/焦虑情绪
@@ -100,6 +169,7 @@ def check_active_care():
 st.title("❤️ 心伴AI")
 st.caption("会引导、会主动关心的AI情感陪伴系统")
 
+# 侧边栏仪表盘
 with st.sidebar:
     st.header("📊 情绪仪表盘")
     emotion_log = load_emotion_log()
@@ -108,31 +178,57 @@ with st.sidebar:
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         fig1 = px.pie(df, names='emotion', title="情绪分布")
         st.plotly_chart(fig1, use_container_width=True)
-    if st.button("🗑️ 清除所有记忆"):
+        
+        # 最近7天趋势
+        last7 = df[df['timestamp'] > datetime.now() - timedelta(days=7)]
+        if not last7.empty:
+            trend = last7.groupby(['date', 'emotion']).size().unstack().fillna(0)
+            fig2 = px.line(trend, title="近7天情绪趋势", markers=True)
+            st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("暂无数据，开始对话后会自动记录")
+    
+    if st.button("🗑️ 清除所有记忆", use_container_width=True):
         save_emotion_log([])
         st.rerun()
 
+# 初始化消息历史
 if "messages" not in st.session_state:
     st.session_state.messages = []
     care_msg = check_active_care()
     if care_msg:
         st.session_state.messages.append({"role": "assistant", "content": f"🔔 {care_msg}"})
 
+# 显示历史消息
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# 输入框
 if prompt := st.chat_input("说点什么..."):
+    # 显示用户消息
     with st.chat_message("user"):
         st.markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # 情绪识别
     emotion_log = load_emotion_log()
     recent_emotions = [log['emotion'] for log in emotion_log[-5:]]
     emotion_result = detect_emotion(prompt, recent_emotions)
-    emotion_log.append({"timestamp": datetime.now().isoformat(), "emotion": emotion_result['label'], "text": prompt[:50]})
+    
+    # 记录情绪
+    emotion_log.append({
+        "timestamp": datetime.now().isoformat(),
+        "emotion": emotion_result['label'],
+        "text": prompt[:50]
+    })
     save_emotion_log(emotion_log)
+    
+    # 获取AI回复
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
     reply = get_ai_reply(prompt, history, emotion_result['need_correction'])
+    
+    # 显示AI回复
     with st.chat_message("assistant"):
         st.markdown(reply)
     st.session_state.messages.append({"role": "assistant", "content": reply})

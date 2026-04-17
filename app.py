@@ -95,8 +95,22 @@ def save_user_profile(profile):
         json.dump(profile, f, ensure_ascii=False, indent=2)
 
 def extract_important_dates(user_input):
-    """从用户输入中提取重要日期（生日、考试等）"""
+    """从用户输入中提取重要日期（仅限用户自己的：生日、考试等）"""
     events = []
+    text = user_input.lower()
+    
+    # 首先检查是否是“别人的”事件（排除）
+    # 如果包含“朋友”、“同学”、“妈妈”、“爸爸”、“他”、“她”等第三人称，且没有明确说“我”，则忽略
+    third_person_patterns = ['朋友', '同学', '妈妈', '爸爸', '母亲', '父亲', '他', '她', '别人', '室友']
+    
+    # 如果句子中包含第三人称，且不包含“我”，则跳过
+    has_third_person = any(pattern in text for pattern in third_person_patterns)
+    has_first_person = '我' in text or '自己' in text
+    
+    # 如果有第三人称但没有第一人称，说明是别人的事，不记录
+    if has_third_person and not has_first_person:
+        return events
+    
     date_patterns = [
         (r'(生日|生辰).*?(\d{1,2})月(\d{1,2})日', 'birthday'),
         (r'(\d{1,2})月(\d{1,2})日.*?(生日|生辰)', 'birthday'),
@@ -104,6 +118,7 @@ def extract_important_dates(user_input):
         (r'(\d{1,2})月(\d{1,2})日.*?(考试|面试|答辩)', 'exam'),
     ]
     current_year = datetime.now().year
+    
     for pattern, event_type in date_patterns:
         match = re.search(pattern, user_input)
         if match:

@@ -190,7 +190,10 @@ def save_emotion_log(log):
         json.dump(log[-100:], f, ensure_ascii=False, indent=2)
 
 def detect_emotion(user_text, recent_emotions):
+    """ 修复后的情绪识别函数，能正确区分 '他开心但我不开心' 这类情况 """
     text = user_text.lower()
+    
+    # 1. 定义关键词
     negative_keywords = [
         '废物', '没用', '太差', '崩溃', '绝望', '焦虑', '烦死了', '好烦',
         '我太笨', '我真蠢', '失败', '糟糕', '头疼', '无语', '心累', '憋屈',
@@ -208,9 +211,58 @@ def detect_emotion(user_text, recent_emotions):
         '快乐', '美好', '甜蜜', '温暖', '阳光', '灿烂', '微笑', '大笑',
         '哈哈', '嘿嘿', '耶', '哇', '好极了'
     ]
+    
+    # 2. 否定词模式（用于反转情绪）
     negation_patterns = ['不', '没', '别', '不是', '没有']
     
-    # 先处理被否定的积极词（转为消极）
+    # --- 核心修复：优先分析“我”的情绪 ---
+    
+    # 2.1 查找所有包含“我”或“自己”的句子片段
+    # 使用简单的分句逻辑：根据“。”、“，”、“但”、“然而”等分隔
+    import re
+    # 按常见分隔符拆分句子
+    sentences = re.split(r'[，,。；;！!？?但但是然而]', text)
+    
+    my_emotion = None
+    for sent in sentences:
+        # 只分析包含“我”或“自己”的句子
+        if '我' in sent or '自己' in sent:
+            # 检查积极词
+            for kw in positive_keywords:
+                if kw in sent:
+                    # 检查这个词是否被否定
+                    idx = sent.find(kw)
+                    if idx > 0:
+                        prev_chars = sent[max(0, idx-3):idx]
+                        if any(neg in prev_chars for neg in negation_patterns):
+                            my_emotion = '消极'  # 例如：“我不开心”
+                        else:
+                            my_emotion = '积极'  # 例如：“我很开心”
+                    else:
+                        my_emotion = '积极'
+                    break
+            # 如果没找到积极词，再找消极词
+            if my_emotion is None:
+                for kw in negative_keywords:
+                    if kw in sent:
+                        my_emotion = '消极'
+                        break
+            # 只要在一个包含“我”的句子里分析出了情绪，就停止分析其他句子
+            if my_emotion is not None:
+                break
+    
+    # 3. 如果找到了“我”的情绪，直接使用
+    if my_emotion is not None:
+        if my_emotion == '消极':
+            need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1
+            if any(x in text for x in ['笨', '没用', '废物', '不行', '不好']):
+                need_correction = True
+            return {'label': '消极', 'need_correction': need_correction}
+        else:
+            return {'label': '积极', 'need_correction': False}
+    
+    # 4. 如果整句话里都没有“我”，则回退到分析整句（原有逻辑，但会处理否定）
+    # 检查被否定的积极词 → 消极
     for kw in positive_keywords:
         if kw in text:
             idx = text.find(kw)
@@ -221,6 +273,7 @@ def detect_emotion(user_text, recent_emotions):
                     return {'label': '消极', 'need_correction': need_correction}
             return {'label': '积极', 'need_correction': False}
     
+    # 检查消极关键词
     for kw in negative_keywords:
         if kw in text:
             need_correction = len([e for e in recent_emotions[-2:] if e in ['消极', '焦虑']]) >= 1

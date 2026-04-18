@@ -1,6 +1,6 @@
 """
 心伴AI - 完整版（智能情绪分类版）
-功能：情感纠偏、情绪仪表盘、主动关怀、长期记忆、安全检测、多用户隔离
+功能：情感纠偏、情绪仪表盘、主动关怀、长期记忆、安全检测
 情绪识别：大模型智能分类（90-95%准确率），降级时使用完整关键词匹配
 """
 
@@ -29,9 +29,10 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-EMOTION_LOG_PATH = os.path.join(DATA_DIR, f"emotion_log_{SESSION_ID}.json")
-USER_PROFILE_PATH = os.path.join(DATA_DIR, f"user_profile_{SESSION_ID}.json")
-SAFETY_LOG_PATH = os.path.join(DATA_DIR, f"safety_log_{SESSION_ID}.json")
+# 固定文件名（所有用户共享数据）
+EMOTION_LOG_PATH = os.path.join(DATA_DIR, "emotion_log.json")
+USER_PROFILE_PATH = os.path.join(DATA_DIR, "user_profile.json")
+SAFETY_LOG_PATH = os.path.join(DATA_DIR, "safety_log.json")
 
 # ==================== 系统提示词 ====================
 SYSTEM_PROMPT = """你是"心伴AI"，一个温暖、温柔、有共情力的情感陪伴助手。你的风格像一位温柔的心理咨询师。
@@ -129,11 +130,13 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
     # 构建情绪分类指令
     classification_instruction = """
 【额外任务】在输出回复之前，请先用一行标注用户的情绪，格式为：[情绪:积极] 或 [情绪:平静] 或 [情绪:消极]
-注意：这个标注只用于内部记录，不要显示给用户。标注后空一行再输出回复。
+
 判断标准：
-- 积极：开心、高兴、兴奋、满足、期待、感恩等正面情绪
+- 积极：开心、高兴、兴奋、满足、期待、希望、向往等正面情绪（包括轻度积极）
 - 消极：难过、焦虑、沮丧、愤怒、无奈、疲惫、压力大、自我贬低等负面情绪
-- 平静：中性、无明显情绪、或混合情绪中负面程度不高
+- 平静：完全中性、无明显情绪倾向、或混合情绪中正负程度相当
+
+注意：表达期待、希望、向往等词，即使没有强烈的“开心”，也应归为“积极”
 """
     
     # 构建模式指令
@@ -436,8 +439,8 @@ with st.sidebar:
             st.write(f"- {ev['name']}: {ev['date']}")
     
     st.divider()
-    st.caption(f"🔑 会话ID: {SESSION_ID[:8]}...")
-    st.caption("💡 您的数据仅自己可见")
+    # 已删除会话ID显示
+    st.caption("💡 您的数据会保存在本地")
     
     if st.button("🗑️ 清除所有记忆", use_container_width=True):
         save_emotion_log([])

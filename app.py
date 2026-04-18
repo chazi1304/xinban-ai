@@ -17,19 +17,6 @@ from openai import OpenAI
 # ==================== 页面配置 ====================
 st.set_page_config(page_title="心伴AI", page_icon="❤️", layout="wide")
 
-# ==================== 用户隔离配置 ====================
-def get_session_id():
-    if "session_id" not in st.session_state:
-        params = st.query_params
-        if "sid" in params:
-            session_id = params["sid"][0]
-        else:
-            session_id = str(uuid.uuid4())
-        st.session_state.session_id = session_id
-    return st.session_state.session_id
-
-SESSION_ID = get_session_id()
-
 # ==================== 配置 ====================
 try:
     DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]

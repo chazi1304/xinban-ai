@@ -1,9 +1,9 @@
 """
-心伴AI - 完整版（含登录 + 大模型记忆 + 实时情绪预测）
-功能：情感纠偏、情绪仪表盘、主动关怀、长期记忆、安全检测、多用户隔离
+心伴AI - 完整版（Supabase登录 + 大模型记忆 + 实时情绪预测）
 """
 
 import streamlit as st
+from st_login_form import login_form
 import json
 import os
 import re
@@ -16,47 +16,29 @@ from openai import OpenAI
 # ==================== 页面配置 ====================
 st.set_page_config(page_title="心伴AI", page_icon="❤️", layout="wide")
 
-# ==================== 用户认证配置 ====================
-def init_auth():
-    """初始化用户认证，返回用户信息"""
-    # 检查是否已登录（Streamlit Cloud 1.33+ 版本支持）
-    try:
-        if hasattr(st, 'experimental_user') and st.experimental_user.is_logged_in:
-            user_info = {
-                "email": st.experimental_user.email,
-                "name": st.experimental_user.name,
-                "user_id": st.experimental_user.sub
-            }
-            st.session_state.user_info = user_info
-            return user_info
-    except:
-        pass
+# ==================== 用户认证 ====================
+# 显示登录表单，返回Supabase连接
+supabase_connection = login_form()
+
+# 处理认证状态
+if st.session_state.get("authenticated", False):
+    # 获取用户名（游客模式下为None）
+    username = st.session_state.get("username")
     
-    # 如果未登录，显示登录选项
-    if "user_info" not in st.session_state or st.session_state.user_info is None:
-        st.info("👋 欢迎使用心伴AI")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔐 Google 登录", use_container_width=True):
-                try:
-                    st.login()
-                except:
-                    st.error("登录功能需要在 Streamlit Cloud 上配置 OAuth")
-        
-        with col2:
-            if st.button("👤 游客模式", use_container_width=True):
-                st.session_state.user_info = {
-                    "email": "guest",
-                    "name": "游客",
-                    "user_id": f"guest_{str(uuid.uuid4())[:8]}"
-                }
-                st.rerun()
-        
-        st.caption("💡 游客模式下数据仅保存在当前设备")
-        st.stop()
-    
-    return st.session_state.user_info
+    if username:
+        # 注册/登录用户
+        USER_ID = username
+        user_name = username
+        is_guest = False
+    else:
+        # 游客模式
+        guest_id = f"guest_{uuid.uuid4().hex[:8]}"
+        USER_ID = guest_id
+        user_name = "游客"
+        is_guest = True
+else:
+    # 未认证，停止执行
+    st.stop()
 
 # ==================== 配置 ====================
 try:
@@ -68,10 +50,6 @@ except:
         st.stop()
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-
-# 用户认证
-user = init_auth()
-USER_ID = user["user_id"]
 
 # 数据目录（按用户隔离）
 DATA_DIR = "data"
@@ -100,9 +78,6 @@ SYSTEM_PROMPT = """你是"心伴AI"，一个温暖、温柔、有共情力的情
 
 用户："我考砸了，我太笨了"
 回复："我能感受到你现在的失落。一次考试没考好，很容易让人怀疑自己。要不要一起看看，问题可能出在复习方法上，还是状态上？"
-
-用户："我好焦虑，压力好大"
-回复："被压力包裹的感觉真的很不好受。可以试着把让你焦虑的事情写下来，挑一件最小的先处理。你试过这个方法吗？"
 
 【禁止行为】
 - 不要说"别难过了""加油""你要坚强"等空话
@@ -208,8 +183,7 @@ def predict_current_emotion(conversation_history, user_input):
 {{
     "emotion": "积极/平静/消极",
     "confidence": 0-100,
-    "reason": "判断理由",
-    "suggestion": "回应建议"
+    "reason": "判断理由"
 }}"""
 
     try:
@@ -223,7 +197,7 @@ def predict_current_emotion(conversation_history, user_input):
         result = json.loads(response.choices[0].message.content)
         return result
     except Exception as e:
-        return {"emotion": "平静", "confidence": 50, "reason": "无法确定", "suggestion": "多和我聊聊吧"}
+        return {"emotion": "平静", "confidence": 50, "reason": "无法确定"}
 
 # ==================== 智能情绪分类 + 回复生成 ====================
 def get_ai_reply_with_emotion(user_input, history, need_correction, disable_correction, user_profile):
@@ -240,7 +214,6 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
     
     classification_instruction = """
 【额外任务】在输出回复之前，请先用一行标注用户的情绪，格式为：[情绪:积极] 或 [情绪:平静] 或 [情绪:消极]
-判断标准：积极包括开心、期待、希望等；消极包括难过、焦虑、疲惫、压力大等。
 """
     
     if disable_correction:
@@ -286,13 +259,9 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
         return clean_reply, detected_emotion
         
     except Exception as e:
-        return fallback_reply(user_input, need_correction, disable_correction)
-
-def fallback_reply(user_input, need_correction, disable_correction):
-    """降级回复"""
-    if need_correction and not disable_correction:
-        return "我能理解你的感受。也许我们可以换个角度看看？你觉得呢？", '消极'
-    return "我在这里陪着你。", '平静'
+        if actual_need_correction:
+            return "我能理解你的感受。也许我们可以换个角度看看？", '消极'
+        return "我在这里陪着你。", '平静'
 
 # ==================== 数据读写 ====================
 def load_emotion_log():
@@ -377,9 +346,12 @@ st.title("❤️ 心伴AI")
 st.caption("会引导、会主动关心的AI情感陪伴系统 | 我能记住你的重要日子")
 
 with st.sidebar:
-    st.write(f"👤 {user['name']}")
-    if user['email'] != "guest":
-        st.caption(f"📧 {user['email']}")
+    # 用户信息
+    if is_guest:
+        st.write(f"👤 {user_name} (游客模式)")
+        st.caption("💡 注册账号可保存对话记录")
+    else:
+        st.write(f"👤 {user_name}")
     
     st.divider()
     st.header("📊 情绪仪表盘")

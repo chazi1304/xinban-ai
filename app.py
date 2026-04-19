@@ -277,7 +277,6 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
         if actual_need_correction:
             return "我能理解你的感受。也许我们可以换个角度看看？", '消极'
         return "我在这里陪着你。", '平静'
-
 # ==================== 数据读写 ====================
 def load_emotion_log():
     if os.path.exists(EMOTION_LOG_PATH):
@@ -502,53 +501,42 @@ if prompt:
     st.session_state.last_prediction = predict_current_emotion(conversation_history_full, prompt)
     
     # 获取AI回复
-history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
-reply, detected_emotion = get_ai_reply_with_emotion(
-    prompt, history, need_correction, disable_corr, profile
-)
-
-# ========== 情绪记录调试代码 ==========
-import json
-import os
-
-st.warning(f"🔍 调试1：用户ID={USER_ID}")
-st.warning(f"🔍 调试2：日志路径={EMOTION_LOG_PATH}")
-
-# 读取现有日志
-existing_logs = []
-if os.path.exists(EMOTION_LOG_PATH):
-    with open(EMOTION_LOG_PATH, "r") as f:
-        existing_logs = json.load(f)
-    st.warning(f"🔍 调试3：读取到 {len(existing_logs)} 条现有记录")
-else:
-    st.warning(f"🔍 调试3：文件不存在，将创建新文件")
-
-# 添加新记录（先用固定值测试）
-new_entry = {
-    "timestamp": datetime.now().isoformat(),
-    "emotion": "积极",
-    "text": prompt[:50]
-}
-existing_logs.append(new_entry)
-
-# 保存
-try:
-    with open(EMOTION_LOG_PATH, "w") as f:
-        json.dump(existing_logs[-100:], f, ensure_ascii=False, indent=2)
-    st.success(f"✅ 调试4：保存成功！共 {len(existing_logs)} 条记录")
-except Exception as e:
-    st.error(f"❌ 调试4：保存失败！错误：{e}")
-
-# 验证
-if os.path.exists(EMOTION_LOG_PATH):
-    with open(EMOTION_LOG_PATH, "r") as f:
-        verify_logs = json.load(f)
-    st.success(f"✅ 调试5：验证成功，文件中有 {len(verify_logs)} 条记录")
-else:
-    st.error(f"❌ 调试5：验证失败，文件不存在！")
-# ========== 调试代码结束 ==========
-
-st.session_state.messages.append({"role": "assistant", "content": reply})
-st.rerun()
+    history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
+    reply, _ = get_ai_reply_with_emotion(
+        prompt, history, need_correction, disable_corr, profile
+    )
+    
+    # ===== 单独调用大模型判断情绪（高精度，保证仪表盘工作）=====
+    try:
+        client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+        emotion_response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": f"只输出一个词：用户说'{prompt}'，情绪是积极、平静还是消极？"}],
+            temperature=0,
+            max_tokens=10
+        )
+        detected_emotion = emotion_response.choices[0].message.content.strip()
+        if detected_emotion not in ["积极", "平静", "消极"]:
+            detected_emotion = "平静"
+    except Exception as e:
+        # 降级：关键词判断
+        text_lower = prompt.lower()
+        if any(kw in text_lower for kw in ['开心', '高兴', '棒', '不错', '喜欢', '好', '耶', '哇']):
+            detected_emotion = "积极"
+        elif any(kw in text_lower for kw in ['累', '烦', '焦虑', '压力', '难过', '伤心', '郁闷', '笨', '没用', '废物', '糟糕', '崩溃']):
+            detected_emotion = "消极"
+        else:
+            detected_emotion = "平静"
+    
+    # 记录情绪日志
+    emotion_log.append({
+        "timestamp": datetime.now().isoformat(),
+        "emotion": detected_emotion,
+        "text": prompt[:50]
+    })
+    save_emotion_log(emotion_log)
+    
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+    st.rerun()
 
 st.caption("💡 试试：「我考砸了，我太笨了」→ 系统会先共情再引导；「别说了」→ 停止纠偏；「我生日是5月20日」→ 我会记住并在当天提醒")

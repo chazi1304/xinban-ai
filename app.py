@@ -509,6 +509,10 @@ if prompt:
         st.write(f"🔍 情绪已修正为: '{detected_emotion}'")
     
     # 记录情绪日志
+
+    # 临时：强制记录为积极
+    detected_emotion = "积极"
+
     emotion_log.append({
         "timestamp": datetime.now().isoformat(),
         "emotion": detected_emotion,

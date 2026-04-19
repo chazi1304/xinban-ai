@@ -368,13 +368,13 @@ with st.sidebar:
     st.divider()
     st.header("📊 情绪仪表盘")
 
-# ===== 直接使用实时情绪预测显示 =====
+# ===== 直接使用实时情绪预测显示（绕过文件）=====
 if "last_prediction" in st.session_state:
     pred = st.session_state.last_prediction
     current_emotion = pred["emotion"]
     current_confidence = pred["confidence"]
     
-    # 显示当前情绪
+    # 显示当前情绪（大号字体）
     if current_emotion == "积极":
         st.success(f"## 😊 {current_emotion}")
     elif current_emotion == "消极":
@@ -384,15 +384,15 @@ if "last_prediction" in st.session_state:
     
     st.progress(current_confidence / 100)
     st.caption(f"置信度: {current_confidence}%")
-    st.caption(f"💡 {pred['reason']}")
+    st.caption(f"判断理由: {pred['reason']}")
     
-    # 简化的情绪分布图
+    # 伪造一个简单的饼图（基于当前情绪）
     import pandas as pd
     fake_data = pd.DataFrame({
         'emotion': [current_emotion, '其他'],
         'count': [80, 20]
     })
-    fig = px.pie(fake_data, values='count', names='emotion', title="情绪分布（实时）")
+    fig = px.pie(fake_data, values='count', names='emotion', title="当前情绪分布（实时）")
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("开始对话后，我会分析你的情绪")

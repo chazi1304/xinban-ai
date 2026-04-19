@@ -214,6 +214,7 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
     
     classification_instruction = """
 【额外任务】在输出回复之前，请先用一行标注用户的情绪，格式为：[情绪:积极] 或 [情绪:平静] 或 [情绪:消极]
+注意：这个标注只用于内部记录，不要显示给用户。标注后空一行再输出回复。
 """
     
     if disable_correction:
@@ -242,12 +243,26 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
         )
         full_response = response.choices[0].message.content
         
+        # 解析情绪标注
         emotion_match = re.search(r'\[情绪:(积极|平静|消极)\]', full_response)
         if emotion_match:
             detected_emotion = emotion_match.group(1)
             clean_reply = re.sub(r'\[情绪:(积极|平静|消极)\]\s*\n?', '', full_response).strip()
         else:
-            detected_emotion = '平静'
+            # 降级：让大模型单独判断情绪
+            try:
+                client2 = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+                emotion_response = client2.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": f"只输出一个词：用户说'{user_input}'，情绪是积极、平静还是消极？"}],
+                    temperature=0,
+                    max_tokens=10
+                )
+                detected_emotion = emotion_response.choices[0].message.content.strip()
+                if detected_emotion not in ["积极", "平静", "消极"]:
+                    detected_emotion = "平静"
+            except:
+                detected_emotion = "平静"
             clean_reply = full_response
         
         if not clean_reply:
@@ -492,27 +507,13 @@ if prompt:
         prompt, history, need_correction, disable_corr, profile
     )
     
-    # 调试：显示识别到的情绪（临时，可删除）
-    st.write(f"🔍 识别到的情绪: '{detected_emotion}'")
-    
     # 确保情绪值有效
     valid_emotions = ["积极", "平静", "消极"]
-    if detected_emotion not in valid_emotions:
-        # 根据用户输入简单判断
-        text_lower = prompt.lower()
-        if any(kw in text_lower for kw in ['开心', '高兴', '棒', '不错', '喜欢', '好']):
-            detected_emotion = "积极"
-        elif any(kw in text_lower for kw in ['累', '烦', '焦虑', '压力', '难过', '伤心', '郁闷']):
-            detected_emotion = "消极"
-        else:
-            detected_emotion = "平静"
-        st.write(f"🔍 情绪已修正为: '{detected_emotion}'")
+    if detected_emotion not in ["积极", "平静", "消极"]:
+        st.warning(f"⚠️ 情绪值异常: '{detected_emotion}'，已重置")
+        detected_emotion = "平静"
     
     # 记录情绪日志
-
-    # 临时：强制记录为积极
-    detected_emotion = "积极"
-
     emotion_log.append({
         "timestamp": datetime.now().isoformat(),
         "emotion": detected_emotion,

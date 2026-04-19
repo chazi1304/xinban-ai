@@ -22,20 +22,23 @@ supabase_connection = login_form()
 
 # 处理认证状态
 if st.session_state.get("authenticated", False):
+    # 获取用户名（游客模式下为None）
     username = st.session_state.get("username")
     
     if username:
+        # 注册/登录用户
         USER_ID = username
         user_name = username
         is_guest = False
     else:
-        # 游客模式：ID 固定，不会随刷新改变
+        # 游客模式：ID 存在 session_state 中，刷新页面也不会变
         if "guest_id" not in st.session_state:
             st.session_state.guest_id = f"guest_{uuid.uuid4().hex[:8]}"
         USER_ID = st.session_state.guest_id
         user_name = "游客"
         is_guest = True
 else:
+    # 未认证，停止执行
     st.stop()
 
 # ==================== 配置 ====================
@@ -275,6 +278,7 @@ def get_ai_reply_with_emotion(user_input, history, need_correction, disable_corr
         if actual_need_correction:
             return "我能理解你的感受。也许我们可以换个角度看看？", '消极'
         return "我在这里陪着你。", '平静'
+
 # ==================== 数据读写 ====================
 def load_emotion_log():
     if os.path.exists(EMOTION_LOG_PATH):
@@ -352,7 +356,6 @@ def get_care_message():
         return None
     st.session_state.last_care_date = today
     return "🌅 早安～昨晚你看起来有点难过，希望今天的心情能像阳光一样明媚 ☀️"
-
 # ==================== UI ====================
 st.title("❤️ 心伴AI")
 st.caption("会引导、会主动关心的AI情感陪伴系统 | 我能记住你的重要日子")
@@ -367,35 +370,40 @@ with st.sidebar:
     
     st.divider()
     st.header("📊 情绪仪表盘")
-
-# ===== 直接使用实时情绪预测显示（绕过文件）=====
-if "last_prediction" in st.session_state:
-    pred = st.session_state.last_prediction
-    current_emotion = pred["emotion"]
-    current_confidence = pred["confidence"]
     
-    # 显示当前情绪（大号字体）
-    if current_emotion == "积极":
-        st.success(f"## 😊 {current_emotion}")
-    elif current_emotion == "消极":
-        st.error(f"## 😔 {current_emotion}")
+    # 使用 emotion_log 文件显示历史统计
+    emotion_log = load_emotion_log()
+    if emotion_log:
+        df = pd.DataFrame(emotion_log)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['date'] = df['timestamp'].dt.date
+        fig1 = px.pie(df, names='emotion', title="历史情绪分布", color_discrete_map={
+            '积极': '#4CAF50', '平静': '#2196F3', '消极': '#F44336'
+        })
+        st.plotly_chart(fig1, use_container_width=True)
+        last7 = df[df['timestamp'] > datetime.now() - timedelta(days=7)]
+        if not last7.empty:
+            trend = last7.groupby(['date', 'emotion']).size().unstack().fillna(0)
+            fig2 = px.line(trend, title="近7天情绪趋势", markers=True)
+            st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info(f"## 😐 {current_emotion}")
+        st.info("暂无历史数据，开始对话后会自动记录")
     
-    st.progress(current_confidence / 100)
-    st.caption(f"置信度: {current_confidence}%")
-    st.caption(f"判断理由: {pred['reason']}")
-    
-    # 伪造一个简单的饼图（基于当前情绪）
-    import pandas as pd
-    fake_data = pd.DataFrame({
-        'emotion': [current_emotion, '其他'],
-        'count': [80, 20]
-    })
-    fig = px.pie(fake_data, values='count', names='emotion', title="当前情绪分布（实时）")
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("开始对话后，我会分析你的情绪")
+    # 实时情绪预测
+    st.divider()
+    st.subheader("🎯 当前情绪")
+    if "last_prediction" in st.session_state:
+        pred = st.session_state.last_prediction
+        if pred["emotion"] == "积极":
+            st.success(f"😊 {pred['emotion']}")
+        elif pred["emotion"] == "消极":
+            st.error(f"😔 {pred['emotion']}")
+        else:
+            st.info(f"😐 {pred['emotion']}")
+        st.progress(pred["confidence"] / 100)
+        st.caption(f"💡 {pred['reason']}")
+    else:
+        st.caption("开始对话后，我会分析你的情绪")
     
     # 显示记忆
     profile = load_user_profile()
@@ -423,7 +431,6 @@ if "messages" not in st.session_state:
     care_msg = get_care_message()
     if care_msg:
         st.session_state.messages.append({"role": "assistant", "content": f"🔔 {care_msg}"})
-
 # 显示历史消息
 for msg in st.session_state.messages:
     if msg["role"] == "user":
@@ -491,9 +498,13 @@ if prompt:
     if disable_corr:
         st.session_state.disable_correction_counter -= 1
     
-    # 实时情绪预测
+    # ===== 实时情绪预测（大模型，唯一情绪判断来源）=====
     conversation_history_full = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-    st.session_state.last_prediction = predict_current_emotion(conversation_history_full, prompt)
+    pred = predict_current_emotion(conversation_history_full, prompt)
+    detected_emotion = pred["emotion"]
+    
+    # 保存到 session_state 供侧边栏显示
+    st.session_state.last_prediction = pred
     
     # 获取AI回复
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
@@ -501,29 +512,7 @@ if prompt:
         prompt, history, need_correction, disable_corr, profile
     )
     
-    # ===== 单独调用大模型判断情绪（高精度，保证仪表盘工作）=====
-    try:
-        client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
-        emotion_response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": f"只输出一个词：用户说'{prompt}'，情绪是积极、平静还是消极？"}],
-            temperature=0,
-            max_tokens=10
-        )
-        detected_emotion = emotion_response.choices[0].message.content.strip()
-        if detected_emotion not in ["积极", "平静", "消极"]:
-            detected_emotion = "平静"
-    except Exception as e:
-        # 降级：关键词判断
-        text_lower = prompt.lower()
-        if any(kw in text_lower for kw in ['开心', '高兴', '棒', '不错', '喜欢', '好', '耶', '哇']):
-            detected_emotion = "积极"
-        elif any(kw in text_lower for kw in ['累', '烦', '焦虑', '压力', '难过', '伤心', '郁闷', '笨', '没用', '废物', '糟糕', '崩溃']):
-            detected_emotion = "消极"
-        else:
-            detected_emotion = "平静"
-    
-    # 记录情绪日志
+    # ===== 记录情绪日志（使用同一个 detected_emotion）=====
     emotion_log.append({
         "timestamp": datetime.now().isoformat(),
         "emotion": detected_emotion,

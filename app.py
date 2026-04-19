@@ -492,15 +492,21 @@ if prompt:
         prompt, history, need_correction, disable_corr, profile
     )
     
-    # 记录情绪日志
-st.write(f"🔍 调试：detected_emotion = '{detected_emotion}'")  # 临时加这行
-
-emotion_log.append({
-    "timestamp": datetime.now().isoformat(),
-    "emotion": detected_emotion,
-    "text": prompt[:50]
-})
-save_emotion_log(emotion_log)
+    # 调试：显示识别到的情绪（临时，可删除）
+    st.write(f"🔍 识别到的情绪: '{detected_emotion}'")
+    
+    # 确保情绪值有效
+    valid_emotions = ["积极", "平静", "消极"]
+    if detected_emotion not in valid_emotions:
+        # 根据用户输入简单判断
+        text_lower = prompt.lower()
+        if any(kw in text_lower for kw in ['开心', '高兴', '棒', '不错', '喜欢', '好']):
+            detected_emotion = "积极"
+        elif any(kw in text_lower for kw in ['累', '烦', '焦虑', '压力', '难过', '伤心', '郁闷']):
+            detected_emotion = "消极"
+        else:
+            detected_emotion = "平静"
+        st.write(f"🔍 情绪已修正为: '{detected_emotion}'")
     
     # 记录情绪日志
     emotion_log.append({

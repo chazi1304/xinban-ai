@@ -513,13 +513,56 @@ if prompt:
         st.warning(f"⚠️ 情绪值异常: '{detected_emotion}'，已重置")
         detected_emotion = "平静"
     
-    # 记录情绪日志
-    emotion_log.append({
-        "timestamp": datetime.now().isoformat(),
-        "emotion": detected_emotion,
-        "text": prompt[:50]
-    })
-    save_emotion_log(emotion_log)
+    # ==================== 情绪记录（超级调试版）====================
+import json
+import os
+
+# 1. 先显示当前状态
+st.warning(f"🔍 调试1：开始记录情绪，用户ID={USER_ID}")
+st.warning(f"🔍 调试2：日志路径={EMOTION_LOG_PATH}")
+
+# 2. 强制设定一个情绪值（先不管大模型返回什么）
+test_emotion_value = "积极"
+
+# 3. 读取现有日志
+existing_logs = []
+if os.path.exists(EMOTION_LOG_PATH):
+    with open(EMOTION_LOG_PATH, "r") as f:
+        existing_logs = json.load(f)
+    st.warning(f"🔍 调试3：读取到 {len(existing_logs)} 条现有记录")
+else:
+    st.warning(f"🔍 调试3：文件不存在，将创建新文件")
+
+# 4. 添加新记录
+new_entry = {
+    "timestamp": datetime.now().isoformat(),
+    "emotion": test_emotion_value,
+    "text": f"[测试]{prompt[:30]}"
+}
+existing_logs.append(new_entry)
+st.warning(f"🔍 调试4：添加新记录，情绪={test_emotion_value}")
+
+# 5. 保存文件
+try:
+    with open(EMOTION_LOG_PATH, "w") as f:
+        json.dump(existing_logs[-100:], f, ensure_ascii=False, indent=2)
+    st.success(f"✅ 调试5：保存成功！共 {len(existing_logs)} 条记录")
+except Exception as e:
+    st.error(f"❌ 调试5：保存失败！错误：{e}")
+
+# 6. 验证文件是否真的写入了
+if os.path.exists(EMOTION_LOG_PATH):
+    with open(EMOTION_LOG_PATH, "r") as f:
+        verify_logs = json.load(f)
+    st.success(f"✅ 调试6：验证成功，文件中有 {len(verify_logs)} 条记录")
+    st.json(verify_logs[-2:])  # 显示最后2条
+else:
+    st.error(f"❌ 调试6：验证失败，文件不存在！")
+# ==================== 调试结束 ====================
+
+# 继续原有的回复显示逻辑
+st.session_state.messages.append({"role": "assistant", "content": reply})
+st.rerun()
     
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.rerun()

@@ -22,22 +22,20 @@ supabase_connection = login_form()
 
 # 处理认证状态
 if st.session_state.get("authenticated", False):
-    # 获取用户名（游客模式下为None）
     username = st.session_state.get("username")
     
     if username:
-        # 注册/登录用户
         USER_ID = username
         user_name = username
         is_guest = False
     else:
-        # 游客模式
-        guest_id = f"guest_{uuid.uuid4().hex[:8]}"
-        USER_ID = guest_id
+        # 游客模式：ID 固定，不会随刷新改变
+        if "guest_id" not in st.session_state:
+            st.session_state.guest_id = f"guest_{uuid.uuid4().hex[:8]}"
+        USER_ID = st.session_state.guest_id
         user_name = "游客"
         is_guest = True
 else:
-    # 未认证，停止执行
     st.stop()
 
 # ==================== 配置 ====================

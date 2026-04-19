@@ -343,16 +343,6 @@ def get_care_message():
 
 # ==================== UI ====================
 st.title("❤️ 心伴AI")
-
-# ===== 临时测试代码 START =====
-test_log = [
-    {"timestamp": datetime.now().isoformat(), "emotion": "积极", "text": "测试1"},
-    {"timestamp": datetime.now().isoformat(), "emotion": "平静", "text": "测试2"},
-    {"timestamp": datetime.now().isoformat(), "emotion": "消极", "text": "测试3"},
-]
-save_emotion_log(test_log)
-st.info("✅ 已添加测试数据，仪表盘应该显示3条记录")
-# ===== 临时测试代码 END =====
 st.caption("会引导、会主动关心的AI情感陪伴系统 | 我能记住你的重要日子")
 
 with st.sidebar:
@@ -501,6 +491,16 @@ if prompt:
     reply, detected_emotion = get_ai_reply_with_emotion(
         prompt, history, need_correction, disable_corr, profile
     )
+    
+    # 记录情绪日志
+st.write(f"🔍 调试：detected_emotion = '{detected_emotion}'")  # 临时加这行
+
+emotion_log.append({
+    "timestamp": datetime.now().isoformat(),
+    "emotion": detected_emotion,
+    "text": prompt[:50]
+})
+save_emotion_log(emotion_log)
     
     # 记录情绪日志
     emotion_log.append({

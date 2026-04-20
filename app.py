@@ -167,7 +167,7 @@ def update_memory_from_conversation(user_input, conversation_history, profile):
 
 # ==================== 实时情绪预测 ====================
 def predict_current_emotion(conversation_history, user_input):
-    """基于对话历史预测当前用户情绪"""
+    """基于对话历史预测当前用户情绪（优化版）"""
     
     history_text = ""
     for msg in conversation_history[-8:]:
@@ -180,25 +180,36 @@ def predict_current_emotion(conversation_history, user_input):
 {history_text}
 用户最新输入：{user_input}
 
+判断标准：
+- 积极：开心、高兴、兴奋、期待、满足、感恩、喜欢、不错、棒、好、幸福、快乐、期待、希望、向往
+- 消极：难过、焦虑、沮丧、愤怒、无奈、疲惫、压力大、自我贬低、伤心、郁闷、烦、累
+- 平静：中性、无明显情绪、或混合情绪中正负程度相当
+
 请输出JSON格式，只输出JSON：
 {{
-    "emotion": "积极/平静/消极",
-    "confidence": 0-100,
-    "reason": "判断理由"
-}}"""
+    "emotion": "积极",
+    "confidence": 85,
+    "reason": "用户表达了对某事的期待和兴奋"
+}}
+
+注意：只要用户有任何轻微的积极倾向（如"还行"、"不错"、"期待"、"希望"），都应归为"积极"。"""
 
     try:
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=200
+            temperature=0.1,  # 降低温度，让输出更稳定
+            max_tokens=150
         )
         result = json.loads(response.choices[0].message.content)
+        # 确保返回的 emotion 是有效值
+        if result.get("emotion") not in ["积极", "平静", "消极"]:
+            result["emotion"] = "平静"
         return result
     except Exception as e:
-        return {"emotion": "平静", "confidence": 50, "reason": "无法确定"}
+        # 降级：返回平静（保证系统不崩溃）
+        return {"emotion": "平静", "confidence": 50, "reason": "判断失败，默认平静"}
 
 # ==================== 智能情绪分类 + 回复生成 ====================
 def get_ai_reply_with_emotion(user_input, history, need_correction, disable_correction, user_profile):
